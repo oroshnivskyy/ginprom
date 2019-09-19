@@ -34,7 +34,7 @@ type pmapb struct {
 // Prometheus contains the metrics gathered by the instance and its path
 type Prometheus struct {
 	reqCnt               *prometheus.CounterVec
-	reqDur, reqSz, resSz prometheus.Summary
+	reqDur, reqSz, resSz *prometheus.SummaryVec
 
 	MetricsPath string
 	Namespace   string
@@ -159,33 +159,36 @@ func (p *Prometheus) register() {
 	)
 	prometheus.MustRegister(p.reqCnt)
 
-	p.reqDur = prometheus.NewSummary(
+	p.reqDur = prometheus.NewSummaryVec(
 		prometheus.SummaryOpts{
 			Namespace: p.Namespace,
 			Subsystem: p.Subsystem,
 			Name:      "request_duration_seconds",
 			Help:      "The HTTP request latencies in seconds.",
 		},
+		[]string{"code", "method", "handler", "host", "path"},
 	)
 	prometheus.MustRegister(p.reqDur)
 
-	p.reqSz = prometheus.NewSummary(
+	p.reqSz = prometheus.NewSummaryVec(
 		prometheus.SummaryOpts{
 			Namespace: p.Namespace,
 			Subsystem: p.Subsystem,
 			Name:      "request_size_bytes",
 			Help:      "The HTTP request sizes in bytes.",
 		},
+		[]string{"code", "method", "handler", "host", "path"},
 	)
 	prometheus.MustRegister(p.reqSz)
 
-	p.resSz = prometheus.NewSummary(
+	p.resSz = prometheus.NewSummaryVec(
 		prometheus.SummaryOpts{
 			Namespace: p.Namespace,
 			Subsystem: p.Subsystem,
 			Name:      "response_size_bytes",
 			Help:      "The HTTP response sizes in bytes.",
 		},
+		[]string{"code", "method", "handler", "host", "path"},
 	)
 	prometheus.MustRegister(p.resSz)
 }
@@ -218,10 +221,10 @@ func (p *Prometheus) Instrument() gin.HandlerFunc {
 		elapsed := float64(time.Since(start)) / float64(time.Second)
 		resSz := float64(c.Writer.Size())
 
-		p.reqDur.Observe(elapsed)
+		p.reqDur.WithLabelValues(status, c.Request.Method, c.HandlerName(), c.Request.Host, path).Observe(elapsed)
 		p.reqCnt.WithLabelValues(status, c.Request.Method, c.HandlerName(), c.Request.Host, path).Inc()
-		p.reqSz.Observe(float64(reqSz))
-		p.resSz.Observe(resSz)
+		p.reqSz.WithLabelValues(status, c.Request.Method, c.HandlerName(), c.Request.Host, path).Observe(float64(reqSz))
+		p.resSz.WithLabelValues(status, c.Request.Method, c.HandlerName(), c.Request.Host, path).Observe(resSz)
 	}
 }
 
