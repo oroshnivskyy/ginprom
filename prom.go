@@ -36,13 +36,14 @@ type Prometheus struct {
 	reqCnt               *prometheus.CounterVec
 	reqDur, reqSz, resSz *prometheus.SummaryVec
 
-	MetricsPath string
-	Namespace   string
-	Subsystem   string
-	Token       string
-	Ignored     pmapb
-	Engine      *gin.Engine
-	PathMap     pmap
+	MetricsPath   string
+	Namespace     string
+	Subsystem     string
+	Token         string
+	Ignored       pmapb
+	Engine        *gin.Engine
+	MetricsEngine *gin.Engine
+	PathMap       pmap
 }
 
 // Path is an option allowing to set the metrics path when intializing with New
@@ -98,6 +99,16 @@ func Engine(e *gin.Engine) func(*Prometheus) {
 	}
 }
 
+// MetricsEngine is an option allowing to set the metrics engine when intializing with New. It is useful when you want to register metrics on different port
+// Example :
+// r := gin.Default()
+// p := ginprom.New(MetricsEngine(r))
+func MetricsEngine(e *gin.Engine) func(*Prometheus) {
+	return func(p *Prometheus) {
+		p.MetricsEngine = e
+	}
+}
+
 // New will initialize a new Prometheus instance with the given options.
 // If no options are passed, sane defaults are used.
 // If a router is passed using the Engine() option, this instance will
@@ -113,7 +124,11 @@ func New(options ...func(*Prometheus)) *Prometheus {
 		option(p)
 	}
 	p.register()
-	if p.Engine != nil {
+	if p.MetricsEngine != nil {
+		p.MetricsEngine.GET(p.MetricsPath, prometheusHandler(p.Token))
+	}
+
+	if p.MetricsEngine == nil && p.Engine != nil {
 		p.Engine.GET(p.MetricsPath, prometheusHandler(p.Token))
 	}
 
@@ -230,9 +245,10 @@ func (p *Prometheus) Instrument() gin.HandlerFunc {
 
 // Use is a method that should be used if the engine is set after middleware
 // initialization
-func (p *Prometheus) Use(e *gin.Engine) {
-	e.GET(p.MetricsPath, prometheusHandler(p.Token))
+func (p *Prometheus) Use(e, metricsEngine *gin.Engine) {
+	metricsEngine.GET(p.MetricsPath, prometheusHandler(p.Token))
 	p.Engine = e
+	p.MetricsEngine = metricsEngine
 }
 
 func prometheusHandler(token string) gin.HandlerFunc {

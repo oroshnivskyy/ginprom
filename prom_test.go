@@ -27,7 +27,7 @@ func TestPrometheus_Use(t *testing.T) {
 	p := New()
 	r := gin.New()
 
-	p.Use(r)
+	p.Use(r, r)
 
 	assert.Equal(t, 1, len(r.Routes()), "only one route should be added")
 	assert.NotNil(t, p.Engine, "the engine should not be empty")
@@ -74,7 +74,7 @@ func TestToken(t *testing.T) {
 
 func TestEngine(t *testing.T) {
 	r := gin.New()
-	p := New(Engine(r))
+	p := New(Engine(r), MetricsEngine(r))
 	assert.Equal(t, 1, len(r.Routes()), "only one route should be added")
 	assert.NotNil(t, p.Engine, "engine should not be nil")
 	assert.Equal(t, r.Routes()[0].Path, p.MetricsPath, "the path should match the metrics path")
@@ -125,7 +125,7 @@ func TestUse(t *testing.T) {
 		assert.Equal(t, http.StatusNotFound, r.Code)
 	})
 
-	p.Use(r)
+	p.Use(r, r)
 	g.GET(p.MetricsPath).Run(r, func(r gofight.HTTPResponse, rq gofight.HTTPRequest) {
 		assert.Equal(t, http.StatusOK, r.Code)
 	})
@@ -277,5 +277,49 @@ func TestMetricsBearerToken(t *testing.T) {
 			assert.Equal(t, http.StatusOK, r.Code)
 			assert.NotContains(t, r.Body.String(), fmt.Sprintf("%s_requests_total", p.Subsystem))
 		})
+	unregister(p)
+}
+
+func TestDoubleEngine(t *testing.T) {
+	r := gin.New()
+	mR := gin.New()
+	p := New(Engine(r), MetricsEngine(mR))
+	assert.Equal(t, 1, len(mR.Routes()), "only one route should be added to metrics engine")
+	assert.Equal(t, 0, len(r.Routes()), "no route should be added")
+	assert.NotNil(t, p.Engine, "engine should not be nil")
+	assert.NotNil(t, p.MetricsEngine, "engine should not be nil")
+	assert.Equal(t, mR.Routes()[0].Path, p.MetricsPath, "the path should match the metrics path")
+	assert.Equal(t, p.MetricsPath, defaultPath, "path should be default")
+	unregister(p)
+}
+
+func TestDoubleEngineInstrument(t *testing.T) {
+	r := gin.New()
+	mR := gin.New()
+	p := New(Engine(r), MetricsEngine(mR))
+	r.Use(p.Instrument())
+	path := "/user/:id"
+	lpath := fmt.Sprintf(`path="%s"`, path)
+
+	r.GET(path, func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"id": c.Param("id")})
+	})
+
+	g := gofight.New()
+	g.GET(p.MetricsPath).Run(mR, func(r gofight.HTTPResponse, rq gofight.HTTPRequest) {
+		assert.Equal(t, http.StatusOK, r.Code)
+		assert.NotContains(t, r.Body.String(), fmt.Sprintf("%s_requests_total", p.Subsystem))
+		assert.NotContains(t, r.Body.String(), lpath, "path must not be present in the response")
+	})
+
+	g.GET("/user/10").Run(r, func(r gofight.HTTPResponse, rq gofight.HTTPRequest) { assert.Equal(t, http.StatusOK, r.Code) })
+
+	g.GET(p.MetricsPath).Run(mR, func(r gofight.HTTPResponse, rq gofight.HTTPRequest) {
+		assert.Equal(t, http.StatusOK, r.Code)
+		assert.Contains(t, r.Body.String(), fmt.Sprintf("%s_requests_total", p.Subsystem))
+		assert.Contains(t, r.Body.String(), lpath, "path must be present in the response")
+		assert.NotContains(t, r.Body.String(), `path="/user/10"`, "raw path must not be present")
+	})
+
 	unregister(p)
 }
